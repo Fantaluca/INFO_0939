@@ -49,46 +49,47 @@ int main(int argc, const char *argv[]) {
         " - Neighbors (up, down, left, right, in, out) = (%3d, %3d, %3d, %3d, %3d, %3d)\n",
             rank, coords[0], coords[1],coords[2], 
             neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT], neighbors[IN], neighbors[OUT]);
-#if 0
-  simulation_data_rank_t simdata;
-  init_simulation(&simdata, argv[1]);
 
-  int numtimesteps = floor(simdata.params.maxt / simdata.params.dt);
+  simulation_data_rank_t simdata_rank;
+  init_simulation(&simdata_rank, argv[1]);
+  
+  int numtimesteps = floor(simdata_rank.params.maxt / simdata_rank.params.dt);
 
   double start = GET_TIME();
   for (int tstep = 0; tstep <= numtimesteps; tstep++) {
-    apply_source(&simdata, tstep);
-
-    if (simdata.params.outrate > 0 && (tstep % simdata.params.outrate) == 0) {
-      for (int i = 0; i < simdata.params.numoutputs; i++) {
-        data_t *output_data = NULL;
-
-        switch (simdata.params.outputs[i].source) {
+    
+    apply_source(&simdata_rank, tstep);
+    
+    if (simdata_rank.params.outrate > 0 && (tstep % simdata_rank.params.outrate) == 0) {
+      
+      for (int i = 0; i < simdata_rank.params.numoutputs; i++) {
+        data_rank_t *output_data = NULL;
+        
+        switch (simdata_rank.params.outputs[i].source) {
         case PRESSURE:
-          output_data = simdata.pold;
+          output_data = simdata_rank.pold;
           break;
         case VELOCITYX:
-          output_data = simdata.vxold;
+          output_data = simdata_rank.vxold;
           break;
         case VELOCITYY:
-          output_data = simdata.vyold;
+          output_data = simdata_rank.vyold;
           break;
         case VELOCITYZ:
-          output_data = simdata.vzold;
+          output_data = simdata_rank.vzold;
           break;
-
         default:
           break;
         }
-
-        double time = tstep * simdata.params.dt;
-        write_output(&simdata.params.outputs[i], output_data, tstep, time);
+        
+        double time = tstep * simdata_rank.params.dt;
+        write_output(&simdata_rank, &simdata_rank.params.outputs[i], output_data, tstep, time); 
       }
     }
-
+    
     if (tstep > 0 && tstep % (numtimesteps / 10) == 0) {
       printf("step %8d/%d", tstep, numtimesteps);
-
+      
       if (tstep != numtimesteps) {
         double elapsed_sofar = GET_TIME() - start;
         double timeperstep_sofar = elapsed_sofar / tstep;
@@ -101,23 +102,25 @@ int main(int argc, const char *argv[]) {
       printf("\n");
       fflush(stdout);
     }
-
-    update_pressure(&simdata);
-    update_velocities(&simdata);
-    swap_timesteps(&simdata);
+    
+    update_pressure(&simdata_rank);
+    update_velocities(&simdata_rank);
+    swap_timesteps(&simdata_rank);
+    
+    
   }
-
+  
   double elapsed = GET_TIME() - start;
   double numupdates =
-      (double)NUMNODESTOT(simdata.pold->grid) * (numtimesteps + 1);
+      (double)NUMNODESTOT(simdata_rank.pold->grid) * (numtimesteps + 1);
   double updatespers = numupdates / elapsed / 1e6;
 
   printf("\nElapsed %.6lf seconds (%.3lf Mupdates/s)\n\n", elapsed,
          updatespers);
 
-  finalize_simulation(&simdata);
-  #endif
-  MPI_finalize();
+  finalize_simulation(&simdata_rank);
+  
+  MPI_Finalize();
   return 0;
 }
 
@@ -127,16 +130,16 @@ int main(int argc, const char *argv[]) {
 
 void setvalue(simulation_data_rank_t *simdata_rank, data_rank_t *data, int m_glob, int n_glob, int p_glob, double val){
   //Need to find the global numnodes
-  int numnodes_globx = 10;
-  int numnodes_globy = 10;
-  int numnodes_globz = 10; // find the coorrect value
+  int numnodes_globx = simdata_rank -> grid.numnodesx;
+  int numnodes_globy = simdata_rank -> grid.numnodesy;
+  int numnodes_globz = simdata_rank -> grid.numnodesz;
 
   // Check for invalid m,n,p index
   if(m_glob < 0 || n_glob < 0 || p_glob < 0 
   || m_glob > numnodes_globx 
   ||  n_glob > numnodes_globy 
   ||  p_glob > numnodes_globz){
-    printf("Error : invlaid access");
+    printf("Error : invlaid access 1");
     }
 
   //defines the local m,n,p index
@@ -147,7 +150,7 @@ void setvalue(simulation_data_rank_t *simdata_rank, data_rank_t *data, int m_glo
   //check inside the subdomain
   if(m < 0 || n < 0 || p < 0 
   || m > NUMNODESX(simdata_rank) - 1|| n > NUMNODESY(simdata_rank) - 1|| p > NUMNODESZ(simdata_rank) - 1) {
-    printf("Error : invlaid access");
+    printf("Error : invlaid access 2");
     }
   
   data -> vals[INDEX3D((data)->grid, m, n, p)] = val;
@@ -156,10 +159,9 @@ void setvalue(simulation_data_rank_t *simdata_rank, data_rank_t *data, int m_glo
 
 double getvalue(simulation_data_rank_t *simdata_rank, data_rank_t *data, int m_glob, int n_glob, int p_glob){
   //Need to find the global numnodes
-  int numnodes_globx = 10;
-  int numnodes_globy = 10;
-  int numnodes_globz = 10; // find the coorrect value
-
+  int numnodes_globx = simdata_rank -> grid.numnodesx;
+  int numnodes_globy = simdata_rank -> grid.numnodesy;
+  int numnodes_globz = simdata_rank -> grid.numnodesz; 
   // Check for invalid m,n,p index
   if(m_glob < 0 || n_glob < 0 || p_glob < 0 
   || m_glob > numnodes_globx 
@@ -309,7 +311,7 @@ data_rank_t *allocate_data_rank(grid_rank_t *grid_rank) {
   }
 
   data_rank_t *data_rank;
-  if ((data_rank= malloc(sizeof(data_t))) == NULL) {
+  if ((data_rank= malloc(sizeof(data_rank_t))) == NULL) {
     DEBUG_PRINT("Failed to allocate memory");
     free(data_rank);
     return NULL;
@@ -318,6 +320,14 @@ data_rank_t *allocate_data_rank(grid_rank_t *grid_rank) {
   if ((data_rank->vals = malloc(numnodes * sizeof(double))) == NULL) {
     DEBUG_PRINT("Failed to allocate memory");
     free(data_rank->vals);
+    free(data_rank);
+    return NULL;
+  }
+
+  if ((data_rank->border_vals = (double **)malloc(numnodes * sizeof(double *))) == NULL) {
+    DEBUG_PRINT("Failed to allocate memory");
+    free(data_rank->border_vals);
+    //add free memory for *border_vals
     free(data_rank);
     return NULL;
   }
@@ -921,35 +931,39 @@ void apply_source(simulation_data_rank_t *simdata_rank, int step) {
 
   if (source->type == SINE) {
     double freq = source->data[0];
-
+    
     setvalue(simdata_rank,simdata_rank->pold, m, n, p, sin(2 * M_PI * freq * t));
-
+    
   } else if (source->type == AUDIO) {
     int sample = MIN((int)(t * source->sampling), source->numsamples - 1);
-
+    
     setvalue(simdata_rank,simdata_rank->pold, m, n, p, simdata_rank->params.source.data[sample]);
+    
   }
+  
 }
 
 void update_pressure(simulation_data_rank_t *simdata_rank) {
   
   const double dtdx = simdata_rank->params.dt / simdata_rank->params.dx;
-  MPI_Request recv_req[6];
-  MPI_Request send_req[6];
-  int tag_rec[6];
-  int tag_send[6];
+  MPI_Request recv_req[3];
+  MPI_Request send_req[3];
+  
+  
   //start of RECEIVE process
   //We store the falttened matrix at the address of border_val[0] as we only need one face.
   // check tags, dims, dest and sources
-  MPI_Irecv(simdata_rank -> vxold -> border_vals[LEFT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], tag_rec[RIGHT], MPI_COMM_WORLD, &recv_req[RIGHT]);
   
-  MPI_Irecv(simdata_rank -> vyold -> border_vals[DOWN], NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[DOWN], tag_rec[UP], MPI_COMM_WORLD, &recv_req[UP]);
+
+  MPI_Irecv(simdata_rank -> vxold -> border_vals[LEFT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 0, MPI_COMM_WORLD, &recv_req[0]);
   
-  MPI_Irecv(simdata_rank -> vzold -> border_vals[OUT], NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[OUT], 
-  tag_rec[IN], MPI_COMM_WORLD, &recv_req[IN]);
+  MPI_Irecv(&(simdata_rank -> vyold -> border_vals[DOWN]), NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 1, MPI_COMM_WORLD, &recv_req[1]);
+  
+  MPI_Irecv(&(simdata_rank -> vzold -> border_vals[OUT]), NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, 
+  neighbors[OUT], 2, MPI_COMM_WORLD, &recv_req[2]);
   
   //Memory allocation for SEND process
-  double* data_out    = (double *) malloc(NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank)*sizeof(double ));
+  double* data_out   = (double *) malloc(NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank)*sizeof(double ));
   double* data_right = (double *) malloc(NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank)*sizeof(double ));
   double* data_up    = (double *) malloc(NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank)*sizeof(double ));
 
@@ -984,11 +998,11 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   
   //Start of Send data process
   // check tags, dims, dest and sources
-  MPI_Isend(data_right, NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], tag_send[LEFT], MPI_COMM_WORLD, &send_req[LEFT]);
+  MPI_Isend(data_right, NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], 4, MPI_COMM_WORLD, &send_req[0]);
 
-  MPI_Isend(data_out, NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[IN], tag_send[IN], MPI_COMM_WORLD, &send_req[IN]);
+  MPI_Isend(data_out, NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[OUT], 5, MPI_COMM_WORLD, &send_req[1]);
   
-  MPI_Isend(data_up, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[DOWN], tag_send[DOWN], MPI_COMM_WORLD, &send_req[DOWN]);
+  MPI_Isend(data_up, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[UP], 6, MPI_COMM_WORLD, &send_req[2]);
 
   //update interior faces
   for (int m = simdata_rank -> grid.startm + 1; m < simdata_rank -> grid.endm; m++) {
@@ -1015,6 +1029,7 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
       }
     }
   }
+  
   //Wait for all receivers
   MPI_Waitall(3, recv_req, MPI_STATUS_IGNORE);
 
@@ -1106,16 +1121,19 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
 void update_velocities(simulation_data_rank_t *simdata_rank){
   const double dtdx = simdata_rank->params.dt / simdata_rank->params.dx;
 
-  MPI_Request send_req[6];
-  MPI_Request rec_req[6];
-  int tag_rec[6];
-  int tag_send[6];  
+  MPI_Request send_req[3];
+  MPI_Request rec_req[3];
+    
   // check tags, dims, dest and sources
-  MPI_Irecv(simdata_rank -> pnew -> border_vals[RIGHT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], tag_rec[LEFT], MPI_COMM_WORLD, &rec_req[LEFT]);
+  MPI_Irecv(&(simdata_rank -> pnew -> border_vals[RIGHT]), NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 4, MPI_COMM_WORLD, &rec_req[0]);
+  printf("%f", *(simdata_rank -> pnew -> border_vals[RIGHT]));
+  for (int i = 0; i < 2; i++) {
+    printf("%f", (simdata_rank -> pnew -> border_vals[RIGHT][i]));
+  }
+  
+  MPI_Irecv(&(simdata_rank -> pnew -> border_vals[IN]), NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 5, MPI_COMM_WORLD, &rec_req[1]);
 
-  MPI_Irecv(simdata_rank -> pnew -> border_vals[IN], NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], tag_rec[OUT], MPI_COMM_WORLD, &rec_req[OUT]);
-
-  MPI_Irecv(simdata_rank -> pnew -> border_vals[DOWN], NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[DOWN], tag_rec[UP], MPI_COMM_WORLD, &rec_req[UP]);
+  MPI_Irecv(&(simdata_rank -> pnew -> border_vals[DOWN]), NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 6, MPI_COMM_WORLD, &rec_req[2]);
   
   //Memory allocation for SEND process
   
@@ -1147,11 +1165,11 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
     }
   }
   // check tags, dims, dest and sources
-  MPI_Isend(data_left, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], tag_send[RIGHT], MPI_COMM_WORLD, &send_req[RIGHT]);
+  MPI_Isend(data_left, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 0, MPI_COMM_WORLD, &send_req[0]);
 
-  MPI_Isend(data_down,  NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[UP], tag_send[UP], MPI_COMM_WORLD, &send_req[UP]);
+  MPI_Isend(data_down,  NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[UP], 1, MPI_COMM_WORLD, &send_req[1]);
 
-  MPI_Isend(data_out, NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN],tag_send[IN], MPI_COMM_WORLD, &send_req[IN]);
+  MPI_Isend(data_out, NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 2, MPI_COMM_WORLD, &send_req[2]);
   
 
   for (int m = simdata_rank -> grid.startm + 1; m < simdata_rank -> grid.endm ; m++) {
@@ -1340,10 +1358,10 @@ void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_fi
   simdata_rank -> grid.startm = rhoin_grid.numnodesx*coords[0]/world_size;
   simdata_rank -> grid.startn = rhoin_grid.numnodesx*coords[1]/world_size;
   simdata_rank -> grid.startp = rhoin_grid.numnodesx*coords[2]/world_size;
-
-  simdata_rank -> grid.endm = rhoin_grid.numnodesx*(coords[0] + 1)/world_size - 1;
-  simdata_rank -> grid.endn = rhoin_grid.numnodesy*(coords[1] + 1)/world_size - 1;
-  simdata_rank -> grid.endp = rhoin_grid.numnodesz*(coords[2] + 1)/world_size - 1;
+  
+  simdata_rank -> grid.endm = 1/(simdata_rank->params.dx) * (rhoin_grid.numnodesx*(coords[0] + 1)/world_size - 1);
+  simdata_rank -> grid.endn = 1/(simdata_rank->params.dx) * (rhoin_grid.numnodesy*(coords[1] + 1)/world_size - 1);
+  simdata_rank -> grid.endp = 1/(simdata_rank->params.dx) * (rhoin_grid.numnodesz*(coords[2] + 1)/world_size - 1);
 
   //TO BE CHANGED TO BE PARALLEL
   if (interpolate_inputmaps(simdata_rank, &sim_grid, c_map, rho_map) != 0) {
@@ -1441,7 +1459,7 @@ void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_fi
   }
     
 
-    void finalize_simulation(simulation_data_t *simdata_rank) {
+    void finalize_simulation(simulation_data_rank_t *simdata_rank) {
       if (simdata_rank->params.outputs != NULL) {
         for (int i = 0; i < simdata_rank->params.numoutputs; i++) {
           free(simdata_rank->params.outputs[i].filename);
@@ -1486,11 +1504,11 @@ void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_fi
   
 
 
-void swap_timesteps(simulation_data_t *simdata) {
-  data_t *tmpp = simdata->pold;
-  data_t *tmpvx = simdata->vxold;
-  data_t *tmpvy = simdata->vyold;
-  data_t *tmpvz = simdata->vzold;
+void swap_timesteps(simulation_data_rank_t *simdata) {
+  data_rank_t *tmpp = simdata->pold;
+  data_rank_t *tmpvx = simdata->vxold;
+  data_rank_t *tmpvy = simdata->vyold;
+  data_rank_t *tmpvz = simdata->vzold;
 
   simdata->pold = simdata->pnew;
   simdata->pnew = tmpp;

@@ -517,12 +517,12 @@ void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_fi
  * @param simdata [INOUT] a simulation data object describing the simulation to
  * finalize
  */
-void finalize_simulation(simulation_data_t *simdata);
+void finalize_simulation(simulation_data_rank_t *simdata);
 
 /**
  * @brief Swap the time steps data, i.e., make the new time step the old one
  *
  * @param simdata [INOUT] a simulation data object describing the simulation
  */
-void swap_timesteps(simulation_data_t *simdata);
+void swap_timesteps(simulation_data_rank_t *simdata);
 
