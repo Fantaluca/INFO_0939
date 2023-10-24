@@ -139,7 +139,7 @@ void setvalue(simulation_data_rank_t *simdata_rank, data_rank_t *data, int m_glo
   || m_glob > numnodes_globx 
   ||  n_glob > numnodes_globy 
   ||  p_glob > numnodes_globz){
-    printf("Error : invlaid access 1");
+    DEBUG_PRINT("Error : invlaid access 1");
     }
 
   //defines the local m,n,p index
@@ -149,8 +149,8 @@ void setvalue(simulation_data_rank_t *simdata_rank, data_rank_t *data, int m_glo
 
   //check inside the subdomain
   if(m < 0 || n < 0 || p < 0 
-  || m > NUMNODESX(simdata_rank) - 1|| n > NUMNODESY(simdata_rank) - 1|| p > NUMNODESZ(simdata_rank) - 1) {
-    printf("Error : invlaid access 2");
+  || m > NUMNODESX(simdata_rank) || n > NUMNODESY(simdata_rank) || p > NUMNODESZ(simdata_rank) ) {
+    DEBUG_PRINT("Error : invlaid access 2");
     }
   
   data -> vals[INDEX3D((data)->grid, m, n, p)] = val;
@@ -323,14 +323,24 @@ data_rank_t *allocate_data_rank(grid_rank_t *grid_rank) {
     free(data_rank);
     return NULL;
   }
-
-  if ((data_rank->border_vals = (double **)malloc(numnodes * sizeof(double *))) == NULL) {
+  data_rank->border_vals = (double **)malloc(6 * sizeof(double *));
+  
+  if(data_rank->border_vals == NULL) {
     DEBUG_PRINT("Failed to allocate memory");
     free(data_rank->border_vals);
     //add free memory for *border_vals
     free(data_rank);
     return NULL;
   }
+  for (int i = 0; i < 6; i++) {
+        if((data_rank->border_vals[i] = (double*)malloc(numnodes * sizeof(double))) == NULL) {
+          DEBUG_PRINT("Failed to allocate memory");
+          return NULL;
+        };
+    }
+  
+  
+  
 
   data_rank->grid = *grid_rank;
 
@@ -954,13 +964,11 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   //We store the falttened matrix at the address of border_val[0] as we only need one face.
   // check tags, dims, dest and sources
   
-
   MPI_Irecv(simdata_rank -> vxold -> border_vals[LEFT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 0, MPI_COMM_WORLD, &recv_req[0]);
   
-  MPI_Irecv(&(simdata_rank -> vyold -> border_vals[DOWN]), NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 1, MPI_COMM_WORLD, &recv_req[1]);
+  MPI_Irecv(simdata_rank -> vyold -> border_vals[DOWN], NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 1, MPI_COMM_WORLD, &recv_req[1]);
   
-  MPI_Irecv(&(simdata_rank -> vzold -> border_vals[OUT]), NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, 
-  neighbors[OUT], 2, MPI_COMM_WORLD, &recv_req[2]);
+  MPI_Irecv(simdata_rank -> vzold -> border_vals[OUT], NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[OUT], 2, MPI_COMM_WORLD, &recv_req[2]);
   
   //Memory allocation for SEND process
   double* data_out   = (double *) malloc(NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank)*sizeof(double ));
@@ -1064,7 +1072,7 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   }
   //data_vy
   for (int m = simdata_rank -> grid.startm ; m < simdata_rank -> grid.endm ; m++) {
-    for (int p = simdata_rank -> grid.startp - 1 ; p < simdata_rank -> grid.endp + 1; p++) {
+    for (int p = simdata_rank -> grid.startp + 1 ; p < simdata_rank -> grid.endp - 1; p++) {
         
         int n = simdata_rank -> grid.startn; 
 
@@ -1082,7 +1090,6 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
         dvz -= p > 0 ? getvalue(simdata_rank, simdata_rank->vzold, m, n, p - 1) : 0.0;
 
         double prev_p = getvalue(simdata_rank, simdata_rank->pold, m, n, p);
-
         setvalue(simdata_rank, simdata_rank->pnew, m, n, p,
                  (prev_p - rhoc2dtdx * (dvx + dvy + dvz)));
     } 
@@ -1125,15 +1132,11 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
   MPI_Request rec_req[3];
     
   // check tags, dims, dest and sources
-  MPI_Irecv(&(simdata_rank -> pnew -> border_vals[RIGHT]), NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 4, MPI_COMM_WORLD, &rec_req[0]);
-  printf("%f", *(simdata_rank -> pnew -> border_vals[RIGHT]));
-  for (int i = 0; i < 2; i++) {
-    printf("%f", (simdata_rank -> pnew -> border_vals[RIGHT][i]));
-  }
+  MPI_Irecv(simdata_rank -> pnew -> border_vals[RIGHT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 4, MPI_COMM_WORLD, &rec_req[0]);
   
-  MPI_Irecv(&(simdata_rank -> pnew -> border_vals[IN]), NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 5, MPI_COMM_WORLD, &rec_req[1]);
+  MPI_Irecv(simdata_rank -> pnew -> border_vals[IN], NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 5, MPI_COMM_WORLD, &rec_req[1]);
 
-  MPI_Irecv(&(simdata_rank -> pnew -> border_vals[DOWN]), NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 6, MPI_COMM_WORLD, &rec_req[2]);
+  MPI_Irecv(simdata_rank -> pnew -> border_vals[DOWN], NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 6, MPI_COMM_WORLD, &rec_req[2]);
   
   //Memory allocation for SEND process
   
@@ -1171,7 +1174,7 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
 
   MPI_Isend(data_out, NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 2, MPI_COMM_WORLD, &send_req[2]);
   
-
+  //check indexs
   for (int m = simdata_rank -> grid.startm + 1; m < simdata_rank -> grid.endm ; m++) {
     for (int n = simdata_rank -> grid.startn + 1; n < simdata_rank -> grid.endn; n++) {
       for (int p = simdata_rank -> grid.startp + 1; p < simdata_rank -> grid.endp; p++) {
@@ -1407,6 +1410,7 @@ void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_fi
     exit(1);
   }
 
+
   fill_data_rank(simdata_rank,simdata_rank->pold, 0.0);
   fill_data_rank(simdata_rank,simdata_rank->pnew, 0.0);
 
@@ -1416,7 +1420,7 @@ void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_fi
   fill_data_rank(simdata_rank,simdata_rank->vyold, 0.0);
   fill_data_rank(simdata_rank,simdata_rank->vznew, 0.0);
   fill_data_rank(simdata_rank,simdata_rank->vzold, 0.0);
-
+  
   printf("\n");
   printf(" Grid spacing: %g\n", simdata_rank->params.dx);
   printf("  Grid size X: %d\n", sim_grid.numnodesx);
