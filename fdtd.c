@@ -965,7 +965,7 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   //We store the falttened matrix at the address of border_val[0] as we only need one face.
   // check tags, dims, dest and sources
   //DEBUG_PRINT(" 1 Start of receive pressure");
-  MPI_Irecv(simdata_rank -> vxold -> border_vals[LEFT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 0, MPI_COMM_WORLD, &recv_req[0]);
+  MPI_Irecv(simdata_rank -> vxold -> border_vals[RIGHT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 0, MPI_COMM_WORLD, &recv_req[0]);
   
   MPI_Irecv(simdata_rank -> vyold -> border_vals[DOWN], NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 1, MPI_COMM_WORLD, &recv_req[1]);
   
@@ -1119,7 +1119,7 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
         double dvy = getvalue(simdata_rank, simdata_rank->vyold, m, n, p);
         double dvz = getvalue(simdata_rank, simdata_rank->vzold, m, n, p);
         
-        dvx -= m > 0 ? simdata_rank-> vxold -> border_vals[LEFT][n * NUMNODESZ(simdata_rank) + p] : 0.0;
+        dvx -= m > 0 ? simdata_rank-> vxold -> border_vals[RIGHT][n * NUMNODESZ(simdata_rank) + p] : 0.0;
         dvy -= n > 0 ? getvalue(simdata_rank, simdata_rank->vyold, m, n - 1, p) : 0.0;
         dvz -= p > 0 ? getvalue(simdata_rank, simdata_rank->vzold, m, n, p - 1) : 0.0;
 
@@ -1143,11 +1143,11 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
     
   // check tags, dims, dest and sources
   //DEBUG_PRINT(" 9 Start of receive vel");
-  MPI_Irecv(simdata_rank -> pnew -> border_vals[RIGHT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], 4, MPI_COMM_WORLD, &rec_req[0]);
+  MPI_Irecv(simdata_rank -> pnew -> border_vals[LEFT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], 4, MPI_COMM_WORLD, &rec_req[0]);
   
   MPI_Irecv(simdata_rank -> pnew -> border_vals[OUT], NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[OUT], 5, MPI_COMM_WORLD, &rec_req[1]);
 
-  MPI_Irecv(simdata_rank -> pnew -> border_vals[DOWN], NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 6, MPI_COMM_WORLD, &rec_req[2]);
+  MPI_Irecv(simdata_rank -> pnew -> border_vals[UP], NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[UP], 6, MPI_COMM_WORLD, &rec_req[2]);
   //DEBUG_PRINT(" 10 End receive vel");
   //Memory allocation for SEND process
   
@@ -1184,7 +1184,7 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
 
   MPI_Isend(data_out, NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 5, MPI_COMM_WORLD, &send_req[1]);
   
-  MPI_Isend(data_down,  NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[UP], 6, MPI_COMM_WORLD, &send_req[2]);
+  MPI_Isend(data_down,  NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 6, MPI_COMM_WORLD, &send_req[2]);
 
   
   //DEBUG_PRINT(" 12 End of send vel");
@@ -1256,7 +1256,7 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
         double p_mnq = getvalue(simdata_rank,simdata_rank->pnew, m, n, p);
 
         double dpx = getvalue(simdata_rank,simdata_rank->pnew, mp1, n, p) - p_mnq;
-        double dpy = simdata_rank -> pnew -> border_vals[DOWN][m * NUMNODESZ(simdata_rank) + p] - p_mnq;
+        double dpy = simdata_rank -> pnew -> border_vals[UP][m * NUMNODESZ(simdata_rank) + p] - p_mnq;
         double dpz = getvalue(simdata_rank,simdata_rank->pnew, m, n, pp1) - p_mnq;
 
         double prev_vx = getvalue(simdata_rank,simdata_rank->vxold, m, n, p);
