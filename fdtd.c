@@ -34,6 +34,7 @@ int main(int argc, const char *argv[]) {
   MPI_Cart_create(MPI_COMM_WORLD, 3, dims, periods, reorder, &cart_comm);
   MPI_Comm_rank(cart_comm, &cart_rank);
 
+  printf("start of Cart Shift");
 
   //Assuming 8 ranks
 
@@ -53,14 +54,16 @@ int main(int argc, const char *argv[]) {
   simulation_data_rank_t simdata_rank;
   init_simulation(&simdata_rank, argv[1]);
   
+
   int numtimesteps = floor(simdata_rank.params.maxt / simdata_rank.params.dt);
 
   double start = GET_TIME();
+  
   for (int tstep = 0; tstep <= numtimesteps; tstep++) {
     
     apply_source(&simdata_rank, tstep);
-    
-    if (simdata_rank.params.outrate > 0 && (tstep % simdata_rank.params.outrate) == 0) {
+   
+    if (simdata_rank.params.outrate > 0 && (tstep % simdata_rank.params.outrate) == 0 && tstep != 0) {
       
       for (int i = 0; i < simdata_rank.params.numoutputs; i++) {
         data_rank_t *output_data = NULL;
@@ -83,7 +86,9 @@ int main(int argc, const char *argv[]) {
         }
         
         double time = tstep * simdata_rank.params.dt;
+        
         write_output(&simdata_rank, &simdata_rank.params.outputs[i], output_data, tstep, time); 
+        
       }
     }
     
@@ -101,12 +106,12 @@ int main(int argc, const char *argv[]) {
 
       printf("\n");
       fflush(stdout);
+      
     }
     
     update_pressure(&simdata_rank);
     update_velocities(&simdata_rank);
     swap_timesteps(&simdata_rank);
-    
     
   }
   
@@ -882,7 +887,7 @@ int read_paramfile(parameters_t *params, const char *filename) {
 /******************************************************************************
  * Simulation related functions                                               *
  ******************************************************************************/
-//NEEDS TO BE MODIFIED
+//NEEDS TO BE MODIFIED MAYBE? 
 int interpolate_inputmaps(simulation_data_rank_t *simdata, grid_rank_t *simgrid,
                           data_rank_t *cin, data_rank_t *rhoin) {
   if (simdata == NULL || cin == NULL) {
@@ -900,9 +905,9 @@ int interpolate_inputmaps(simulation_data_rank_t *simdata, grid_rank_t *simgrid,
   double dx = simdata->params.dx;
   double dxd2 = simdata->params.dx / 2;
 
-  for (int m = 0; m < simgrid->numnodesx; m++) {
-    for (int n = 0; n < simgrid->numnodesy; n++) {
-      for (int p = 0; p < simgrid->numnodesz; p++) {
+  for (int m = simdata -> grid.startm; m < simdata->grid.endm; m++) {
+    for (int n = simdata -> grid.startn; n < simdata -> grid.endn; n++) {
+      for (int p = simdata -> grid.startp; p < simdata -> grid.endp; p++) {
 
         double x = m * dx;
         double y = n * dx;
@@ -911,15 +916,15 @@ int interpolate_inputmaps(simulation_data_rank_t *simdata, grid_rank_t *simgrid,
         int mc, nc, pc;
         closest_index(&cin->grid, x, y, z, &mc, &nc, &pc);
 
-        SETVALUE(simdata->c, m, n, p, GETVALUE(cin, mc, nc, pc));
-        SETVALUE(simdata->rho, m, n, p, GETVALUE(rhoin, mc, nc, pc));
+        setvalue(simdata, simdata->c, m, n, p, getvalue(simdata, cin, mc, nc, pc));
+        setvalue(simdata, simdata->rho, m, n, p, getvalue(simdata, rhoin, mc, nc, pc));
 
         x += dxd2;
         y += dxd2;
         z += dxd2;
 
         closest_index(&rhoin->grid, x, y, z, &mc, &nc, &pc);
-        SETVALUE(simdata->rhohalf, m, n, p, GETVALUE(rhoin, mc, nc, pc));
+        setvalue(simdata, simdata->rhohalf, m, n, p, getvalue(simdata, rhoin, mc, nc, pc));
       }
     }
   }
@@ -954,7 +959,7 @@ void apply_source(simulation_data_rank_t *simdata_rank, int step) {
 }
 
 void update_pressure(simulation_data_rank_t *simdata_rank) {
-  
+  DEBUG_PRINT("Start of update_pressure");
   const double dtdx = simdata_rank->params.dt / simdata_rank->params.dx;
   MPI_Request recv_req[3];
   MPI_Request send_req[3];
@@ -963,12 +968,13 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   //start of RECEIVE process
   //We store the falttened matrix at the address of border_val[0] as we only need one face.
   // check tags, dims, dest and sources
-  
+  DEBUG_PRINT(" 1 Start of receive pressure");
   MPI_Irecv(simdata_rank -> vxold -> border_vals[LEFT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 0, MPI_COMM_WORLD, &recv_req[0]);
   
   MPI_Irecv(simdata_rank -> vyold -> border_vals[DOWN], NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 1, MPI_COMM_WORLD, &recv_req[1]);
   
-  MPI_Irecv(simdata_rank -> vzold -> border_vals[OUT], NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[OUT], 2, MPI_COMM_WORLD, &recv_req[2]);
+  MPI_Irecv(simdata_rank -> vzold -> border_vals[IN], NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[IN], 2, MPI_COMM_WORLD, &recv_req[2]);
+  DEBUG_PRINT(" 2 End receive pressure");
   
   //Memory allocation for SEND process
   double* data_out   = (double *) malloc(NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank)*sizeof(double ));
@@ -980,11 +986,12 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
     exit(0);  
     }
   
-  //Storage pnew on IN face
+  //Storage pnew on IN face 
+  //MAYBE simdata_rank -> grid.startm + 1 ??
   for (int m = simdata_rank -> grid.startm ; m < simdata_rank -> grid.endm ; m++) {
     for (int n = simdata_rank -> grid.startn ; n < simdata_rank -> grid.endn ; n++) {
         int p = simdata_rank -> grid.endp; //?
-        data_out[m * NUMNODESY(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> pnew, m,n,p); 
+        data_out[m * NUMNODESY(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> vzold, m,n,p); 
     }
   }
 
@@ -992,7 +999,7 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   for (int p = simdata_rank -> grid.startp; p < simdata_rank -> grid.endp; p++) {
     for (int n = simdata_rank -> grid.startn; n < simdata_rank -> grid.endn; n++) {
         int m = simdata_rank -> grid.endm; //?
-        data_right[p * NUMNODESY(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> pnew, m,n,p);
+        data_right[p * NUMNODESY(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> vxold, m,n,p);
     }
   }
 
@@ -1000,17 +1007,21 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   for (int p = simdata_rank -> grid.startp; p < simdata_rank -> grid.endp; p++) {
     for (int m = simdata_rank -> grid.startn; m < simdata_rank -> grid.endn; m++) {
         int n = simdata_rank -> grid.endn; //?
-        data_right[p * NUMNODESX(simdata_rank) + m] = getvalue(simdata_rank, simdata_rank -> pnew, m,n,p);
+        data_right[p * NUMNODESX(simdata_rank) + m] = getvalue(simdata_rank, simdata_rank -> vyold, m,n,p);
     }
   }
   
   //Start of Send data process
   // check tags, dims, dest and sources
-  MPI_Isend(data_right, NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], 4, MPI_COMM_WORLD, &send_req[0]);
+  DEBUG_PRINT(" 3 Start of send pressure");
+  MPI_Isend(data_right, NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], 0, MPI_COMM_WORLD, &send_req[0]);
 
-  MPI_Isend(data_out, NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[OUT], 5, MPI_COMM_WORLD, &send_req[1]);
+  MPI_Isend(data_up, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[UP], 1, MPI_COMM_WORLD, &send_req[1]);
   
-  MPI_Isend(data_up, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[UP], 6, MPI_COMM_WORLD, &send_req[2]);
+  MPI_Isend(data_out, NUMNODESX(simdata_rank)*NUMNODESY(simdata_rank), MPI_DOUBLE, neighbors[OUT], 2, MPI_COMM_WORLD, &send_req[2]);
+  
+  
+  DEBUG_PRINT(" 4 End of send pressure");
 
   //update interior faces
   for (int m = simdata_rank -> grid.startm + 1; m < simdata_rank -> grid.endm; m++) {
@@ -1039,8 +1050,9 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
   }
   
   //Wait for all receivers
+  DEBUG_PRINT(" 5 Start of Wait process receive");
   MPI_Waitall(3, recv_req, MPI_STATUS_IGNORE);
-
+  DEBUG_PRINT(" 6 End of Wait process receive");
   //Start the computation on subdomain boundaries using **ghostvals
 
   //Check loop index to not pass over repeated cells (i.e. "-1" and "+1" in the following 3 double loops)
@@ -1062,7 +1074,7 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
         
         dvx -= m > 0 ? getvalue(simdata_rank, simdata_rank->vxold, m - 1, n, p) : 0.0;
         dvy -= n > 0 ? getvalue(simdata_rank, simdata_rank->vyold, m, n - 1, p) : 0.0;
-        dvz -= p > 0 ? simdata_rank-> vzold -> border_vals[OUT][m * NUMNODESY(simdata_rank) + n] : 0.0; // = dvz[m,n,p - 1] ?
+        dvz -= p > 0 ? simdata_rank-> vzold -> border_vals[IN][m * NUMNODESY(simdata_rank) + n] : 0.0; // = dvz[m,n,p - 1] ?
 
         double prev_p = getvalue(simdata_rank, simdata_rank->pold, m, n, p);
 
@@ -1121,8 +1133,9 @@ void update_pressure(simulation_data_rank_t *simdata_rank) {
         
     }
   }
-  
+  DEBUG_PRINT(" 7 Start of wait send process");
   MPI_Waitall(3, send_req, MPI_STATUS_IGNORE);
+  DEBUG_PRINT(" 8 End of wait send process");
 }
 
 void update_velocities(simulation_data_rank_t *simdata_rank){
@@ -1132,16 +1145,17 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
   MPI_Request rec_req[3];
     
   // check tags, dims, dest and sources
-  MPI_Irecv(simdata_rank -> pnew -> border_vals[RIGHT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 4, MPI_COMM_WORLD, &rec_req[0]);
+  DEBUG_PRINT(" 9 Start of receive vel");
+  MPI_Irecv(simdata_rank -> pnew -> border_vals[RIGHT], NUMNODESY(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[LEFT], 4, MPI_COMM_WORLD, &rec_req[0]);
   
-  MPI_Irecv(simdata_rank -> pnew -> border_vals[IN], NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 5, MPI_COMM_WORLD, &rec_req[1]);
+  MPI_Irecv(simdata_rank -> pnew -> border_vals[OUT], NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[OUT], 5, MPI_COMM_WORLD, &rec_req[1]);
 
   MPI_Irecv(simdata_rank -> pnew -> border_vals[DOWN], NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[DOWN], 6, MPI_COMM_WORLD, &rec_req[2]);
-  
+  DEBUG_PRINT(" 10 End receive vel");
   //Memory allocation for SEND process
   
-  double* data_left = (double *) malloc(NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank)*sizeof(double ));
-  double* data_out    = (double *) malloc(NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank)*sizeof(double ));
+  double* data_left    = (double *) malloc(NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank)*sizeof(double ));
+  double* data_out     = (double *) malloc(NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank)*sizeof(double ));
   double* data_down    = (double *) malloc( NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank)*sizeof(double ));
   
   if(data_out == NULL || data_left == NULL || data_down == NULL){ 
@@ -1152,27 +1166,31 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
   for(int m = simdata_rank -> grid.startm; m < simdata_rank -> grid.endm; m++){
     for(int n = simdata_rank -> grid.startn; n < simdata_rank -> grid.endn; n++){
       int p = simdata_rank -> grid.startp;
-      data_out[m*NUMNODESY(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> vzold, m , n, p);
+      data_out[m*NUMNODESY(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> pnew, m , n, p);
     }
   }
   for(int m = simdata_rank -> grid.startm; m < simdata_rank -> grid.endm; m++){
     for(int p = simdata_rank -> grid.startp; p < simdata_rank -> grid.endp; p++){
       int n = simdata_rank -> grid.startn;
-      data_down[m*NUMNODESZ(simdata_rank) + p] = getvalue(simdata_rank, simdata_rank -> vyold, m , n, p);
+      data_down[m*NUMNODESZ(simdata_rank) + p] = getvalue(simdata_rank, simdata_rank -> pnew, m , n, p);
     }
   }
   for(int p = simdata_rank -> grid.startp; p < simdata_rank -> grid.endp; p++){
     for(int n = simdata_rank -> grid.startn; n < simdata_rank -> grid.endn; n++){
       int m = simdata_rank -> grid.startm;
-      data_left[p*NUMNODESZ(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> vxold, m , n, p);
+      data_left[p*NUMNODESZ(simdata_rank) + n] = getvalue(simdata_rank, simdata_rank -> pnew, m , n, p);
     }
   }
   // check tags, dims, dest and sources
-  MPI_Isend(data_left, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 0, MPI_COMM_WORLD, &send_req[0]);
+  DEBUG_PRINT(" 11 Start of send vel");
+  MPI_Isend(data_left, NUMNODESZ(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[RIGHT], 4, MPI_COMM_WORLD, &send_req[0]);
 
-  MPI_Isend(data_down,  NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[UP], 1, MPI_COMM_WORLD, &send_req[1]);
+  MPI_Isend(data_out, NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 5, MPI_COMM_WORLD, &send_req[1]);
+  
+  MPI_Isend(data_down,  NUMNODESX(simdata_rank)*NUMNODESZ(simdata_rank), MPI_DOUBLE, neighbors[UP], 6, MPI_COMM_WORLD, &send_req[2]);
 
-  MPI_Isend(data_out, NUMNODESY(simdata_rank)*NUMNODESX(simdata_rank), MPI_DOUBLE, neighbors[IN], 2, MPI_COMM_WORLD, &send_req[2]);
+  
+  DEBUG_PRINT(" 12 End of send vel");
   
   //check indexs
   for (int m = simdata_rank -> grid.startm + 1; m < simdata_rank -> grid.endm ; m++) {
@@ -1200,8 +1218,9 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
       }
     }
   }
+  DEBUG_PRINT(" 13 Start of wait receive vel");
   MPI_Waitall(3, rec_req, MPI_STATUS_IGNORE);
-
+  DEBUG_PRINT(" 14 End of wait receive vel");
   //Start of computation on bondary faces
   // IN face
   for(int m = simdata_rank -> grid.startm; m < simdata_rank -> grid.endm; m++){
@@ -1216,7 +1235,7 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
 
         double dpx = getvalue(simdata_rank,simdata_rank->pnew, mp1, n, p) - p_mnq;
         double dpy = getvalue(simdata_rank,simdata_rank->pnew, m, np1, p) - p_mnq;
-        double dpz = simdata_rank -> pnew -> border_vals[IN][m * NUMNODESY(simdata_rank) + n] - p_mnq;
+        double dpz = simdata_rank -> pnew -> border_vals[OUT][m * NUMNODESY(simdata_rank) + n] - p_mnq;
 
         double prev_vx = getvalue(simdata_rank,simdata_rank->vxold, m, n, p);
         double prev_vy = getvalue(simdata_rank,simdata_rank->vyold, m, n, p);
@@ -1263,7 +1282,7 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
 
         double p_mnq = getvalue(simdata_rank,simdata_rank->pnew, m, n, p);
 
-        double dpx = simdata_rank -> pnew -> border_vals[RIGHT][n * NUMNODESZ(simdata_rank) + p] - p_mnq;
+        double dpx = simdata_rank -> pnew -> border_vals[LEFT][n * NUMNODESZ(simdata_rank) + p] - p_mnq;
         double dpy =  getvalue(simdata_rank,simdata_rank->pnew, m, np1, p) - p_mnq;
         double dpz = getvalue(simdata_rank,simdata_rank->pnew, m, n, pp1) - p_mnq;
 
@@ -1276,11 +1295,13 @@ void update_velocities(simulation_data_rank_t *simdata_rank){
         setvalue(simdata_rank,simdata_rank->vznew, m, n, p, prev_vz - dtdxrho * dpz);
     }
   }
-
+  DEBUG_PRINT(" 15 Start of wait send process vel");
+  MPI_Waitall(3, send_req, MPI_STATUS_IGNORE);
+  DEBUG_PRINT(" 16 End of wait send process vel");
 }
 
 void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_filename) {
-  
+  DEBUG_PRINT(" init_simulation");
   if (read_paramfile(&simdata_rank->params, params_filename) != 0) {
     printf("Failed to read parameters. Aborting...\n\n");
     exit(1);
@@ -1458,7 +1479,7 @@ void init_simulation(simulation_data_rank_t *simdata_rank, const char *params_fi
   free(rho_map);
   free(c_map->vals);
   free(c_map);
-
+  DEBUG_PRINT("End of init simulation");
     
   }
     
